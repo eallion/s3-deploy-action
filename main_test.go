@@ -1,9 +1,9 @@
 package main
 
 import (
-	"aliyun-oss-website-action/config"
-	"aliyun-oss-website-action/operation"
-	"aliyun-oss-website-action/utils"
+	"s3-deploy-action/config"
+	"s3-deploy-action/operation"
+	"s3-deploy-action/utils"
 	"fmt"
 	"os"
 	"testing"

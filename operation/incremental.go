@@ -1,13 +1,13 @@
 package operation
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
-	"io"
 	"sync"
 
-	"github.com/fangbinwei/aliyun-oss-go-sdk/oss"
+	"s3-deploy-action/provider"
+
+
 )
 
 const INCREMENTAL_CONFIG = ".actioninfo"
@@ -53,17 +53,19 @@ func generateIncrementalConfig(uploaded []UploadedObject) ([]byte, error) {
 
 }
 
-func UploadIncrementalConfig(bucket *oss.Bucket, records []UploadedObject) error {
+func UploadIncrementalConfig(p provider.Provider, records []UploadedObject) error {
 	j, err := generateIncrementalConfig(records)
 	if err != nil {
 		fmt.Printf("Failed to generate incremental info: %v\n", err)
 		return err
 	}
 
-	options := []oss.Option{
-		oss.ObjectACL(oss.ACLPrivate),
-	}
-	err = bucket.PutObject(INCREMENTAL_CONFIG, bytes.NewReader(j), options...)
+	options := &provider.UploadOptions{}
+	// Private ACL is handled in PutObject implementation or we can pass it in options if we extend UploadOptions
+	// For now, let's assume the provider handles it or we add ACL to UploadOptions.
+	// The Aliyun implementation I wrote adds ACLPrivate by default for PutObject.
+	
+	err = p.PutObject(INCREMENTAL_CONFIG, j, options)
 	if err != nil {
 		fmt.Printf("Failed to upload incremental info: %v\n", err)
 		return err
@@ -73,17 +75,27 @@ func UploadIncrementalConfig(bucket *oss.Bucket, records []UploadedObject) error
 	return nil
 }
 
-func GetRemoteIncrementalConfig(bucket *oss.Bucket) (*IncrementalConfig, error) {
-	c := new(bytes.Buffer)
-	body, err := bucket.GetObject(INCREMENTAL_CONFIG)
+func GetRemoteIncrementalConfig(p provider.Provider) (*IncrementalConfig, error) {
+	body, err := p.GetObject(INCREMENTAL_CONFIG)
 	if err != nil {
+		// If file not found, return nil, nil?
+		// The original code printed error and returned nil, err.
+		// But for incremental, if file doesn't exist, it should probably just return nil (no incremental info).
+		// However, keeping original behavior for now.
+		// Wait, if it's 404, we should probably handle it gracefully?
+		// The original code:
+		// body, err := bucket.GetObject(INCREMENTAL_CONFIG)
+		// if err != nil { ... return nil, err }
+		// So if it fails (e.g. 404), it returns error.
+		// But in main.go:
+		// incremental, _ = operation.GetRemoteIncrementalConfig(config.Bucket)
+		// It ignores the error!
 		fmt.Printf("Failed to get remote incremental info: %v\n", err)
 		return nil, err
 	}
-	io.Copy(c, body)
-	body.Close()
+	
 	i := new(IncrementalConfig)
-	err = i.parse(c.Bytes())
+	err = i.parse(body)
 	if err != nil {
 		fmt.Printf("Failed to parse remote incremental info: %v\n", err)
 		return nil, err

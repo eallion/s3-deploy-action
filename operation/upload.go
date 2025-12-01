@@ -7,10 +7,9 @@ import (
 	"strings"
 	"sync"
 
-	"aliyun-oss-website-action/config"
-	"aliyun-oss-website-action/utils"
-
-	"github.com/fangbinwei/aliyun-oss-go-sdk/oss"
+	"s3-deploy-action/config"
+	"s3-deploy-action/provider"
+	"s3-deploy-action/utils"
 )
 
 type UploadedObject struct {
@@ -20,7 +19,7 @@ type UploadedObject struct {
 }
 
 // UploadObjects upload files to OSS
-func UploadObjects(root string, bucket *oss.Bucket, records <-chan utils.FileInfoType, i *IncrementalConfig) ([]UploadedObject, []error) {
+func UploadObjects(root string, p provider.Provider, records <-chan utils.FileInfoType, i *IncrementalConfig) ([]UploadedObject, []error) {
 	if root == "/" {
 		fmt.Println("You should not upload the root directory, use ./ instead. 通常来说, 你不应该上传根目录, 也许你是要配置 ./")
 		os.Exit(1)
@@ -34,6 +33,12 @@ func UploadObjects(root string, bucket *oss.Bucket, records <-chan utils.FileInf
 	var errs []error
 	uploaded := make([]UploadedObject, 0, 20)
 	var tokens = make(chan struct{}, 30)
+
+	var skippedCount int
+	var uploadedCount int
+	var failedCount int
+	var countMutex sync.Mutex
+
 	for item := range records {
 		sw.Add(1)
 		go func(item utils.FileInfoType) {
@@ -43,46 +48,58 @@ func UploadObjects(root string, bucket *oss.Bucket, records <-chan utils.FileInf
 			options := getHTTPHeader(&item)
 
 			if shouldExclude(objectKey) {
-				fmt.Printf("[EXCLUDE] objectKey: %s\n\n", objectKey)
+				// fmt.Printf("[EXCLUDE] objectKey: %s\n\n", objectKey)
 				return
 			}
 			if shouldSkip(item, objectKey, i) {
-				fmt.Printf("[SKIP] objectKey: %s \n\n", objectKey)
+				// fmt.Printf("[SKIP] objectKey: %s \n\n", objectKey)
 				uploadedMutex.Lock()
 				uploaded = append(uploaded, UploadedObject{ObjectKey: objectKey, Incremental: true, FileInfoType: item})
 				uploadedMutex.Unlock()
+				countMutex.Lock()
+				skippedCount++
+				countMutex.Unlock()
 				return
 			}
 
 			tokens <- struct{}{}
-			err := bucket.PutObjectFromFile(objectKey, fPath, options...)
+			err := p.UploadObject(objectKey, fPath, options)
 			<-tokens
 			if err != nil {
 				errorMutex.Lock()
 				errs = append(errs, fmt.Errorf("[FAILED] objectKey: %s\nfilePath: %s\nDetail: %v", objectKey, fPath, err))
 				errorMutex.Unlock()
+				countMutex.Lock()
+				failedCount++
+				countMutex.Unlock()
 				return
 			}
-			fmt.Printf("objectKey: %s\nfilePath: %s\n\n", objectKey, fPath)
+			// fmt.Printf("objectKey: %s\nfilePath: %s\n\n", objectKey, fPath)
 			uploadedMutex.Lock()
 			uploaded = append(uploaded, UploadedObject{ObjectKey: objectKey, FileInfoType: item})
 			uploadedMutex.Unlock()
+			countMutex.Lock()
+			uploadedCount++
+			countMutex.Unlock()
 		}(item)
 	}
 	sw.Wait()
+
+	fmt.Printf("Summary:\n- Skipped: %d files\n- Uploaded: %d files\n- Failed: %d files\n", skippedCount, uploadedCount, failedCount)
+
 	if len(errs) > 0 {
 		return uploaded, errs
 	}
 	return uploaded, nil
 }
 
-func getHTTPHeader(item *utils.FileInfoType) []oss.Option {
-	return []oss.Option{
-		getCacheControlOption(item),
+func getHTTPHeader(item *utils.FileInfoType) *provider.UploadOptions {
+	return &provider.UploadOptions{
+		CacheControl: getCacheControlOption(item),
 	}
 }
 
-func getCacheControlOption(item *utils.FileInfoType) oss.Option {
+func getCacheControlOption(item *utils.FileInfoType) string {
 	var value string
 	filename := item.Name
 
@@ -100,7 +117,7 @@ func getCacheControlOption(item *utils.FileInfoType) oss.Option {
 		value = config.OtherCacheControl
 	}
 	item.CacheControl = value
-	return oss.CacheControl(value)
+	return value
 }
 
 func shouldExclude(objectKey string) bool {

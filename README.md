@@ -1,22 +1,25 @@
-# aliyun-oss-website-action
+# s3-deploy-action
 
-deploy website on aliyun OSS(Alibaba Cloud OSS)
+deploy website on aliyun OSS(Alibaba Cloud OSS) or Tencent Cloud COS.
 
-将静态网站部署在阿里云OSS
+将静态网站部署在阿里云 OSS 或腾讯云 COS。
 
 ## 概览
-- 在阿里云OSS创建一个存放网站的bucket
-- 准备一个域名, 可能需要备案(bucket选择非大陆区域, 可以不备案, 但是如果CDN加速区域包括大陆, 仍然需要备案)
-- 在你的网站repo中, 配置github action, action 触发则**增量上传**网站repo生成的资源文件到bucket中
-- 通过阿里云OSS的CDN, 可以很方便地加速网站的访问, 支持HTTPS
-> 阿里云HTTPS免费证书停止自动续签, 但是可以自己[申请免费的证书](https://help.aliyun.com/document_detail/156645.htm), 具体解决方案参考[该公告](https://help.aliyun.com/document_detail/479351.html)
+
+- 在阿里云 OSS 或腾讯云 COS 创建一个存放网站的 bucket
+- 准备一个域名，可能需要备案
+- 在你的网站 repo 中，配置 github action, action 触发则**增量上传**网站 repo 生成的资源文件到 bucket 中
+- 通过 CDN, 可以很方便地加速网站的访问，支持 HTTPS
 
 ## Usage
 
+### Aliyun OSS (阿里云 OSS)
+
 ```yml
     - name: upload files to OSS
-      uses: fangbinwei/aliyun-oss-website-action@v1
+      uses: eallion/s3-deploy-action@v1
       with:
+          provider: aliyun # Optional, default is aliyun
           accessKeyId: ${{ secrets.ACCESS_KEY_ID }}
           accessKeySecret: ${{ secrets.ACCESS_KEY_SECRET }}
           bucket: your-bucket-name
@@ -24,40 +27,71 @@ deploy website on aliyun OSS(Alibaba Cloud OSS)
           endpoint: oss-cn-shanghai.aliyuncs.com
           folder: your-website-output-folder
 ```
-> 如果你使用了environment secret请[查看这里](#配置了environment-secret怎么不生效)
+
+### Tencent Cloud COS (腾讯云 COS)
+
+```yml
+    - name: upload files to COS
+      uses: eallion/s3-deploy-action@v1
+      with:
+          provider: tencent
+          cos_secret_id: ${{ secrets.COS_SECRET_ID }}
+          cos_secret_key: ${{ secrets.COS_SECRET_KEY }}
+          cos_bucket: your-bucket-name-1250000000
+          cos_region: ap-guangzhou
+          folder: your-website-output-folder
+```
+
+> 如果你使用了 environment secret 请[查看这里](#配置了environment-secret怎么不生效)
+
 ### 配置项
+
+| 参数 | 描述 | 必填 | 默认值 |
+| --- | --- | --- | --- |
+| `provider` | 云服务提供商 (`aliyun` 或 `tencent`) | 否 | `aliyun` |
+| `folder` | 包含网站文件的本地目录 | 是 | - |
+| `exclude` | 排除的文件或目录 (glob 模式) | 否 | - |
+| `incremental` | 是否启用增量更新 | 否 | `true` |
+| `skipSetting` | 是否跳过静态页面配置 (index/404) | 否 | `false` |
+| `htmlCacheControl` | HTML 文件的 Cache-Control | 否 | `no-cache` |
+| `imageCacheControl` | 图片文件的 Cache-Control | 否 | `max-age=864000` |
+| `otherCacheControl` | 其他文件的 Cache-Control | 否 | `max-age=2592000` |
+
+#### 阿里云特有参数 (provider: aliyun)
+
 - `accessKeyId`: **必填**
 - `accessKeySecret`: **必填**
-- `endpoint`: **必填**, 支持指定protocol, 例如`https://example.org`或者`http://example.org`
-- `folder`: **必填**, repo打包输出的资源文件夹
-- `bucket`: **必填**,部署网站的bucket, 用于存放网站的资源
-- `indexPage`: 默认`index.html`.网站首页(用于[静态页面配置](#静态页面配置))
-- `notFoundPage`: 默认`404.html`.网站404页面(用于[静态页面配置](#静态页面配置))
-- `incremental`: 默认`true`. 使用增量上传.
-- `skipSetting`: 默认`false`, 是否跳过设置[静态页面配置](#静态页面配置)
-- `htmlCacheControl`: 默认`no-cache`
-- `imageCacheControl`: 默认`max-age=864000`
-- `pdfCacheControl`: 默认`max-age=2592000`
-- `otherCacheControl`: 默认`max-age=2592000`
-- `exclude`: 不上传`folder`下的某些文件/文件夹
-- `cname`: 默认`false`. 若`endpoint`填写自定义域名/bucket域名, 需设置为`true`. (使用CDN的场景下, 不推荐使用自定义域名)
+- `endpoint`: **必填**, 支持指定 protocol, 例如`https://example.org`或者`http://example.org`
+- `bucket`: **必填**,部署网站的 bucket, 用于存放网站的资源
+- `cname`: 默认`false`. 若`endpoint`填写自定义域名/bucket 域名，需设置为`true`. (使用 CDN 的场景下，不推荐使用自定义域名)
+
+#### 腾讯云特有参数 (provider: tencent)
+
+- `cos_secret_id`: **必填**
+- `cos_secret_key`: **必填**
+- `cos_bucket`: **必填**, 存储桶名称 (如 `example-1250000000`)
+- `cos_region`: **必填**, 存储桶地域 (如 `ap-guangzhou`)
 
 ## incremental
+
 **开启`incremental`**
-上传文件到OSS后, 还会将文件的`ContentMD5`和`Cache-Control`收集到名为`.actioninfo`的私有文件中. 当再次触发action的时候, 会将待上传的文件信息与`.actioninfo`中记录的信息比对, 信息未发生变化的文件将跳过上传步骤, 只进行增量上传. 且在上传之后, 根据`.actioninfo`和已上传的文件信息, 将OSS中多余的文件进行删除.
+上传文件到 OSS 后，还会将文件的`ContentMD5`和`Cache-Control`收集到名为`.actioninfo`的私有文件中。当再次触发 action 的时候，会将待上传的文件信息与`.actioninfo`中记录的信息比对，信息未发生变化的文件将跳过上传步骤，只进行增量上传。且在上传之后，根据`.actioninfo`和已上传的文件信息，将 OSS 中多余的文件进行删除。
 
-> `.actioninfo` 记录了上一次action执行时, 所上传的文件信息. 私有, 不可公共读写.
+> `.actioninfo` 记录了上一次 action 执行时，所上传的文件信息。私有，不可公共读写。
 
-**关闭`incremental`** 或 OSS中不存在`.actioninfo`文件
+**关闭`incremental`** 或 OSS 中不存在`.actioninfo`文件
 
 会执行如下步骤
-1. 清除所有OSS中已有的文件
-2. 上传新的文件到OSS中
 
-> **计划未来优化这个步骤, 优化后, 先上传新的文件到OSS中, 再diff删除多余的文件.** 
+1. 清除所有 OSS 中已有的文件
+2. 上传新的文件到 OSS 中
+
+> **计划未来优化这个步骤，优化后，先上传新的文件到 OSS 中，再 diff 删除多余的文件。**
 
 ## Cache-Control
+
 为上传的资源默认设置的`Cache-Control`如下
+
 |资源类型 | Cache-Control|
 |----| ----|
 |.html|no-cache|
@@ -65,18 +99,19 @@ deploy website on aliyun OSS(Alibaba Cloud OSS)
 |other|max-age=2592000(30days)|
 
 ## 静态页面配置
-默认的, action会将阿里云OSS的静态页面配置成如下
+
+默认的，action 会将阿里云 OSS 的静态页面配置成如下
 ![2020-08-06-03-18-25](https://image.fangbinwei.cn/github/aliyun-oss-website-action/2020-08-06-03-18-25_05d556d8.png)
 
-若不需要action来设置, 可以配置`skipSetting`为`true`
+若不需要 action 来设置，可以配置`skipSetting`为`true`
 
 ## exclude
-如果`folder`下的某些文件不需要上传
 
+如果`folder`下的某些文件不需要上传
 
 ```yml
     - name: exclude some files
-      uses: fangbinwei/aliyun-oss-website-action@v1
+      uses: eallion/s3-deploy-action@v1
       with:
         folder: dist
         exclude: |
@@ -89,20 +124,26 @@ deploy website on aliyun OSS(Alibaba Cloud OSS)
       # match dist/tmp2/a.txt
       # match dist/tmp2/a/b.txt, not match dist/tmp2/tmp3/a/b.txt
 ```
+
 > 不支持`**`
 
 或者
+
 ```yml
 - name: Clean files before upload
   run: rm -f dist/tmp.txt
 ```
 
-## Docker image
-直接使用已经build好的docker image
+## Docker image / Composite Action
+
+本项目现已支持 Composite Action 模式，无需 Docker 镜像即可快速运行。
+
+如果需要使用 Docker 镜像：
+
 ```yml
     - name: upload files to OSS
-      uses: docker://fangbinwei/aliyun-oss-website-action:v1
-      # 使用env而不是with, 参数可以见本项目的action.yml
+      uses: docker://eallion/s3-deploy-action:v1
+      # 使用 env 而不是 with, 参数可以见本项目的 action.yml
       env:
           ACCESS_KEY_ID: ${{ secrets.ACCESS_KEY_ID }}
           ACCESS_KEY_SECRET: ${{ secrets.ACCESS_KEY_SECRET }}
@@ -112,7 +153,8 @@ deploy website on aliyun OSS(Alibaba Cloud OSS)
 ```
 
 ## Demo
-### 部署VuePress项目
+
+### 部署 VuePress 项目
 
 ```yml
 
@@ -131,7 +173,7 @@ jobs:
       # load repo to /github/workspace
     - uses: actions/checkout@v2
       with:
-          repository: fangbinwei/blog
+          repository: eallion/blog
           fetch-depth: 0
     - name: Use Node.js
       uses: actions/setup-node@v1
@@ -142,7 +184,7 @@ jobs:
     # 打包文档命令
     - run: yarn docs:build
     - name: upload files to OSS
-      uses: fangbinwei/aliyun-oss-website-action@v1
+      uses: eallion/s3-deploy-action@v1
       with:
           accessKeyId: ${{ secrets.ACCESS_KEY_ID }}
           accessKeySecret: ${{ secrets.ACCESS_KEY_SECRET }}
@@ -150,15 +192,16 @@ jobs:
           endpoint: "oss-cn-shanghai.aliyuncs.com" 
           folder: ".vuepress/dist"
 ```
+
 具体可以参考本项目的[workflow](.github/workflows/test.yml), npm/yarn配合`action/cache`加速依赖安装
 
 ### Vue
 
-[see here](https://github.com/fangbinwei/oss-website-demo-spa-vue)
+[see here](https://github.com/eallion/oss-website-demo-spa-vue)
 
 ```yml
 - name: upload files to OSS
-      uses: fangbinwei/aliyun-oss-website-action@v1
+      uses: eallion/s3-deploy-action@v1
       with:
           accessKeyId: ${{ secrets.ACCESS_KEY_ID }}
           accessKeySecret: ${{ secrets.ACCESS_KEY_SECRET }}
@@ -174,24 +217,25 @@ jobs:
 
 ## FAQ
 
-### 配合CDN使用时, OSS更新后, CDN未刷新
+### 配合 CDN 使用时，OSS 更新后，CDN 未刷新
 
-开启OSS提供的CDN缓存自动刷新功能, 将触发操作配置为`PutObject`, `DeleteObject`.
+开启 OSS 提供的 CDN 缓存自动刷新功能，将触发操作配置为`PutObject`, `DeleteObject`.
 
 ![2020-12-13-23-51-28](https://image.fangbinwei.cn/github/aliyun-oss-website-action/2020-12-13-23-51-28_2c310155.png)
 
 ![2020-12-13-23-51-55](https://image.fangbinwei.cn/github/aliyun-oss-website-action/2020-12-13-23-51-55_5fe79a54.png)
 
-### `endpoint`使用自定义域名, 但是无法上传
-1. 如果`endpoint`的域名CNAME记录为阿里云CDN, CDN是否配置了http强制跳转https? 若配置了, 需要在`endpoint`中指定https, 即`endpoint`为`https://example.org`
+### `endpoint`使用自定义域名，但是无法上传
 
-2. 如果`endpoint`的域名CNAME记录为阿里云CDN, 在CDN为加速范围为全球时有遇到过如下报错`The bucket you are attempting to access must be addressed using the specified endpoint. Please send all future requests to this endpoint.`, 则`endpoint`不能使用自定义域名, 使用OSS源站的endpoint.
+1. 如果`endpoint`的域名 CNAME 记录为阿里云 CDN, CDN 是否配置了 http 强制跳转 https? 若配置了，需要在`endpoint`中指定 https, 即`endpoint`为`https://example.org`
 
-### 配置了environment secret怎么不生效
+2. 如果`endpoint`的域名 CNAME 记录为阿里云 CDN, 在 CDN 为加速范围为全球时有遇到过如下报错`The bucket you are attempting to access must be addressed using the specified endpoint. Please send all future requests to this endpoint.`, 则`endpoint`不能使用自定义域名，使用 OSS 源站的 endpoint.
+
+### 配置了 environment secret 怎么不生效
 
 ![2021-05-21-16-47-59](https://image.fangbinwei.cn/github/aliyun-oss-website-action/2021-05-21-16-47-59_affec2b0.png)
 
-如果使用environment secret, 那么需要如下类似的配置
+如果使用 environment secret, 那么需要如下类似的配置
 
 ```diff
 
@@ -201,3 +245,32 @@ jobs:
 +    environment: your-environment-name
 
 ```
+
+## Local Testing (本地测试)
+
+如果您已安装 Go 环境，可以在本地直接运行进行测试。
+
+1. **准备测试数据**：
+
+    ```bash
+    mkdir -p public
+    echo "Hello World" > public/index.html
+    ```
+
+2. **设置环境变量** (以腾讯云为例)：
+
+    ```bash
+    export FOLDER=./public
+    export PROVIDER=tencent
+    export COS_SECRET_ID=您的 SecretId
+    export COS_SECRET_KEY=您的 SecretKey
+    export COS_BUCKET=您的 BucketName
+    export COS_REGION=您的 Region
+    export INCREMENTAL=true
+    ```
+
+3. **运行**：
+
+    ```bash
+    go run main.go
+    ```

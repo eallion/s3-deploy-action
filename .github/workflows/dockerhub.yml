@@ -36,4 +36,4 @@ jobs:
         with:
           context: .
           push: true
-          tags: ${{ format('fangbinwei/aliyun-oss-website-action:{0}', github.event.inputs.tag || 'latest') }}
+          tags: ${{ format('eallion/s3-deploy-action:{0}', github.event.inputs.tag || 'latest') }}

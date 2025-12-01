@@ -4,9 +4,12 @@ import (
 	"fmt"
 	"os"
 
-	"aliyun-oss-website-action/config"
-	"aliyun-oss-website-action/operation"
-	"aliyun-oss-website-action/utils"
+	"s3-deploy-action/config"
+	"s3-deploy-action/operation"
+	"s3-deploy-action/provider"
+	"s3-deploy-action/provider/aliyun"
+	"s3-deploy-action/provider/tencent"
+	"s3-deploy-action/utils"
 )
 
 func main() {
@@ -16,8 +19,29 @@ func main() {
 		os.Exit(1)
 	}
 
+	var p provider.Provider
+	var err error
+
+	switch config.Provider {
+	case "aliyun":
+		p, err = aliyun.NewAliyunProvider(config.Endpoint, config.AccessKeyID, config.AccessKeySecret, config.BucketName, config.IsCname)
+	case "tencent":
+		p, err = tencent.NewTencentProvider(config.CosBucket, config.CosRegion, config.CosSecretID, config.CosSecretKey)
+	default:
+		fmt.Printf("Unsupported provider: %s\n", config.Provider)
+		os.Exit(1)
+	}
+
+	if err != nil {
+		fmt.Printf("Failed to initialize provider: %v\n", err)
+		os.Exit(1)
+	}
+
 	if !config.SkipSetting {
-		operation.SetStaticWebsiteConfig()
+		err := p.SetWebsiteConfig(config.IndexPage, config.NotFoundPage)
+		if err != nil {
+			fmt.Printf("Failed to set website config: %v\n", err)
+		}
 	} else {
 		fmt.Println("skip setting static pages related configuration")
 	}
@@ -25,14 +49,14 @@ func main() {
 	var incremental *operation.IncrementalConfig
 	if config.IsIncremental {
 		fmt.Println("---- [incremental] ---->")
-		incremental, _ = operation.GetRemoteIncrementalConfig(config.Bucket)
+		incremental, _ = operation.GetRemoteIncrementalConfig(p)
 		fmt.Println("<---- [incremental end] ----")
 		fmt.Println()
 	}
 	if !config.IsIncremental || incremental == nil {
 		// TODO: delete after upload
 		fmt.Println("---- [delete] ---->")
-		deleteErrs := operation.DeleteObjects(config.Bucket)
+		deleteErrs := operation.DeleteObjects(p)
 		utils.LogErrors(deleteErrs)
 		fmt.Println("<---- [delete end] ----")
 		fmt.Println()
@@ -41,14 +65,14 @@ func main() {
 	records := utils.WalkDir(config.Folder)
 
 	fmt.Println("---- [upload] ---->")
-	uploaded, uploadErrs := operation.UploadObjects(config.Folder, config.Bucket, records, incremental)
+	uploaded, uploadErrs := operation.UploadObjects(config.Folder, p, records, incremental)
 	utils.LogErrors(uploadErrs)
 	fmt.Println("<---- [upload end] ----")
 	fmt.Println()
 
 	if config.IsIncremental && incremental != nil {
 		fmt.Println("---- [delete] ---->")
-		deleteErrs := operation.DeleteObjectsIncremental(config.Bucket, incremental)
+		deleteErrs := operation.DeleteObjectsIncremental(p, incremental)
 		utils.LogErrors(deleteErrs)
 		fmt.Println("<---- [delete end] ----")
 		fmt.Println()
@@ -56,7 +80,7 @@ func main() {
 
 	if config.IsIncremental {
 		fmt.Println("---- [incremental] ---->")
-		operation.UploadIncrementalConfig(config.Bucket, uploaded)
+		operation.UploadIncrementalConfig(p, uploaded)
 		fmt.Println("<---- [incremental end] ----")
 		fmt.Println()
 	}

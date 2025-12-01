@@ -4,22 +4,26 @@ import (
 	"fmt"
 	"sync"
 
-	"aliyun-oss-website-action/utils"
-
-	"github.com/fangbinwei/aliyun-oss-go-sdk/oss"
+	"s3-deploy-action/provider"
+	"s3-deploy-action/utils"
 )
 
 const maxKeys = 100
 
 // DeleteObjects is used to delete all objects of the bucket
-func DeleteObjects(bucket *oss.Bucket) []error {
+func DeleteObjects(p provider.Provider) []error {
 	var errs []error
 	objKeyCollection := make(chan string, maxKeys)
-	go listObjects(bucket, objKeyCollection)
+	go listObjects(p, objKeyCollection)
 
 	var sw sync.WaitGroup
 	var mutex sync.Mutex
 	tokens := make(chan struct{}, 10)
+
+	var deletedCount int
+	var failedCount int
+	var countMutex sync.Mutex
+
 	for k := range objKeyCollection {
 		sw.Add(1)
 		go func(key string) {
@@ -28,17 +32,25 @@ func DeleteObjects(bucket *oss.Bucket) []error {
 				<-tokens
 			}()
 			tokens <- struct{}{}
-			err := deleteObject(bucket, key)
+			err := deleteObject(p, key)
 			if err != nil {
 				mutex.Lock()
 				errs = append(errs, fmt.Errorf("[FAILED] objectKey: %s\nDetail: %v", key, err))
 				mutex.Unlock()
+				countMutex.Lock()
+				failedCount++
+				countMutex.Unlock()
 				return
 			}
-			fmt.Printf("objectKey: %s\n", key)
+			// fmt.Printf("objectKey: %s\n", key)
+			countMutex.Lock()
+			deletedCount++
+			countMutex.Unlock()
 		}(k)
 	}
 	sw.Wait()
+
+	fmt.Printf("Summary:\n- Deleted: %d objects\n- Failed: %d objects\n", deletedCount, failedCount)
 
 	if len(errs) > 0 {
 		return errs
@@ -46,7 +58,7 @@ func DeleteObjects(bucket *oss.Bucket) []error {
 	return nil
 }
 
-func DeleteObjectsIncremental(bucket *oss.Bucket, i *IncrementalConfig) []error {
+func DeleteObjectsIncremental(p provider.Provider, i *IncrementalConfig) []error {
 	if i == nil {
 		return nil
 	}
@@ -62,6 +74,11 @@ func DeleteObjectsIncremental(bucket *oss.Bucket, i *IncrementalConfig) []error 
 	var sw sync.WaitGroup
 	var mutex sync.Mutex
 	tokens := make(chan struct{}, 10)
+
+	var deletedCount int
+	var failedCount int
+	var countMutex sync.Mutex
+
 	for k := range i.M {
 		sw.Add(1)
 		go func(key string) {
@@ -70,17 +87,25 @@ func DeleteObjectsIncremental(bucket *oss.Bucket, i *IncrementalConfig) []error 
 				<-tokens
 			}()
 			tokens <- struct{}{}
-			err := deleteObject(bucket, key)
+			err := deleteObject(p, key)
 			if err != nil {
 				mutex.Lock()
 				errs = append(errs, fmt.Errorf("[FAILED] objectKey: %s\nDetail: %v", key, err))
 				mutex.Unlock()
+				countMutex.Lock()
+				failedCount++
+				countMutex.Unlock()
 				return
 			}
-			fmt.Printf("objectKey: %s\n", key)
+			// fmt.Printf("objectKey: %s\n", key)
+			countMutex.Lock()
+			deletedCount++
+			countMutex.Unlock()
 		}(k)
 	}
 	sw.Wait()
+
+	fmt.Printf("Summary:\n- Deleted: %d objects\n- Failed: %d objects\n", deletedCount, failedCount)
 
 	if len(errs) > 0 {
 		return errs
@@ -88,29 +113,22 @@ func DeleteObjectsIncremental(bucket *oss.Bucket, i *IncrementalConfig) []error 
 	return nil
 }
 
-func deleteObject(bucket *oss.Bucket, key string) error {
-	err := bucket.DeleteObject(key)
+func deleteObject(p provider.Provider, key string) error {
+	err := p.DeleteObject(key)
 	if err != nil {
 		return err
 	}
 	return nil
 }
 
-func listObjects(bucket *oss.Bucket, objKeyCollection chan<- string) {
-	marker := oss.Marker("")
-	for {
-		lor, err := bucket.ListObjects(oss.MaxKeys(maxKeys), marker)
-		if err != nil {
-			utils.HandleError(err)
-		}
-		for _, object := range lor.Objects {
-			objKeyCollection <- object.Key
-		}
-		marker = oss.Marker(lor.NextMarker)
-		if !lor.IsTruncated {
-			close(objKeyCollection)
-			break
-		}
+func listObjects(p provider.Provider, objKeyCollection chan<- string) {
+	defer close(objKeyCollection)
+	objects, err := p.ListObjects(maxKeys)
+	if err != nil {
+		utils.HandleError(err)
+		return
 	}
-
+	for _, key := range objects {
+		objKeyCollection <- key
+	}
 }

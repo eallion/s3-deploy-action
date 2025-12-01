@@ -1,0 +1,31 @@
+name: Test Tencent COS Deploy
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+
+      - name: Create test file
+        run: |
+          mkdir -p public
+          echo "Hello Tencent COS" > public/index.html
+          echo "Test Content" > public/test.txt
+
+      - name: Deploy to Tencent COS
+        uses: ./ # Uses the action in the current repository
+        with:
+          folder: public
+          provider: tencent
+          cos_secret_id: ${{ secrets.COS_SECRET_ID }}
+          cos_secret_key: ${{ secrets.COS_SECRET_KEY }}
+          cos_bucket: ${{ secrets.COS_BUCKET }}
+          cos_region: ${{ secrets.COS_REGION }}
+          incremental: true

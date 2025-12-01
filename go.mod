@@ -1,4 +1,4 @@
-module aliyun-oss-website-action
+module s3-deploy-action
 
 go 1.13
 
@@ -9,6 +9,7 @@ require (
 	github.com/niemeyer/pretty v0.0.0-20200227124842-a10e7caefd8e // indirect
 	github.com/satori/go.uuid v1.2.0 // indirect
 	github.com/stretchr/testify v1.6.1
+	github.com/tencentyun/cos-go-sdk-v5 v0.7.40
 	golang.org/x/time v0.0.0-20200630173020-3af7569d3a1e // indirect
 	gopkg.in/check.v1 v1.0.0-20200227125254-8fa46927fb4f // indirect
 )

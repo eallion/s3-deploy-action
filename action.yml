@@ -1,10 +1,26 @@
-name: 'aliyun-oss-website-action'
-description: 'Deploy your static website on aliyun OSS'
-author: 'Binwei Fang <fangbinwei@yeah.net>'
+name: 's3-deploy-action'
+description: 'Deploy your static website on aliyun OSS or Tencent COS'
+author: 'eallion <eallion@gmail.com>'
 branding:
   icon: 'upload'
   color: 'gray-dark'
 inputs:
+  provider:
+    description: 'Cloud provider: aliyun or tencent'
+    required: false
+    default: 'aliyun'
+  cos_secret_id:
+    description: 'Tencent COS SecretId'
+    required: false
+  cos_secret_key:
+    description: 'Tencent COS SecretKey'
+    required: false
+  cos_bucket:
+    description: 'Tencent COS Bucket'
+    required: false
+  cos_region:
+    description: 'Tencent COS Region'
+    required: false
   folder:
     description: 'Folder which contains the website files'
     required: true
@@ -13,16 +29,16 @@ inputs:
     required: false
   accessKeyId:
     description: 'Aliyun OSS accessKeyId.'
-    required: true
+    required: false
   accessKeySecret:
     description: 'Aliyun OSS accessKeySecret.'
-    required: true
+    required: false
   bucket:
     description: 'Aliyun OSS bucket instance.'
-    required: true
+    required: false
   endpoint:
     description: 'OSS region domain'
-    required: true
+    required: false
   cname:
     description: '`true` to identify the endpoint is your custom domain.'
     required: false
@@ -60,23 +76,76 @@ inputs:
     required: false
     default: 'max-age=2592000'
 runs:
-  using: 'docker'
-  image: 'Dockerfile'
-  env:
-    ACCESS_KEY_ID: ${{ inputs.accessKeyId }}
-    ACCESS_KEY_SECRET: ${{ inputs.accessKeySecret }}
-    BUCKET: ${{ inputs.bucket }}
-    ENDPOINT: ${{ inputs.endpoint }}
-    CNAME: ${{ inputs.cname }}
-    FOLDER: ${{ inputs.folder }}
-    EXCLUDE: ${{ inputs.exclude }}
-    SKIP_SETTING: ${{ inputs.skipSetting }}
-    INCREMENTAL: ${{ inputs.incremental }}
-    INDEX_PAGE: ${{ inputs.indexPage }}
-    NOT_FOUND_PAGE: ${{ inputs.notFoundPage }}
-    HTML_CACHE_CONTROL: ${{ inputs.htmlCacheControl }}
-    IMAGE_CACHE_CONTROL: ${{ inputs.imageCacheControl }}
-    OTHER_CACHE_CONTROL: ${{ inputs.otherCacheControl }}
-    PDF_CACHE_CONTROL: ${{ inputs.pdfCacheControl }}
+  using: "composite"
+  steps:
+    - name: Run S3 Deploy
+      shell: bash
+      env:
+        PROVIDER: ${{ inputs.provider }}
+        COS_SECRET_ID: ${{ inputs.cos_secret_id }}
+        COS_SECRET_KEY: ${{ inputs.cos_secret_key }}
+        COS_BUCKET: ${{ inputs.cos_bucket }}
+        COS_REGION: ${{ inputs.cos_region }}
+        ACCESS_KEY_ID: ${{ inputs.accessKeyId }}
+        ACCESS_KEY_SECRET: ${{ inputs.accessKeySecret }}
+        BUCKET: ${{ inputs.bucket }}
+        ENDPOINT: ${{ inputs.endpoint }}
+        CNAME: ${{ inputs.cname }}
+        FOLDER: ${{ inputs.folder }}
+        EXCLUDE: ${{ inputs.exclude }}
+        SKIP_SETTING: ${{ inputs.skipSetting }}
+        INCREMENTAL: ${{ inputs.incremental }}
+        INDEX_PAGE: ${{ inputs.indexPage }}
+        NOT_FOUND_PAGE: ${{ inputs.notFoundPage }}
+        HTML_CACHE_CONTROL: ${{ inputs.htmlCacheControl }}
+        IMAGE_CACHE_CONTROL: ${{ inputs.imageCacheControl }}
+        OTHER_CACHE_CONTROL: ${{ inputs.otherCacheControl }}
+        PDF_CACHE_CONTROL: ${{ inputs.pdfCacheControl }}
+      run: |
+        # Determine OS and Architecture
+        OS="$(uname -s)"
+        ARCH="$(uname -m)"
+        
+        case "$OS" in
+          Linux)
+            BINARY_OS="linux"
+            ;;
+          Darwin)
+            BINARY_OS="darwin"
+            ;;
+          CYGWIN*|MINGW*|MSYS*)
+            BINARY_OS="windows"
+            ;;
+          *)
+            echo "Unsupported OS: $OS"
+            exit 1
+            ;;
+        esac
 
-    
+        case "$ARCH" in
+          x86_64|amd64)
+            BINARY_ARCH="amd64"
+            ;;
+          aarch64|arm64)
+            BINARY_ARCH="arm64"
+            ;;
+          *)
+            echo "Unsupported Architecture: $ARCH"
+            exit 1
+            ;;
+        esac
+
+        BINARY_NAME="s3-deploy-${BINARY_OS}-${BINARY_ARCH}"
+        if [ "$BINARY_OS" = "windows" ]; then
+          BINARY_NAME="${BINARY_NAME}.exe"
+        fi
+
+        BINARY_PATH="${{ github.action_path }}/dist/${BINARY_NAME}"
+
+        if [ ! -f "$BINARY_PATH" ]; then
+          echo "Binary not found: $BINARY_PATH"
+          exit 1
+        fi
+
+        chmod +x "$BINARY_PATH"
+        "$BINARY_PATH"
